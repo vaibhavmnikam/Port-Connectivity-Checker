@@ -1,0 +1,41 @@
+---
+- name: Check port connectivity from servera to serverb and fetch report
+  hosts: servera
+  gather_facts: true  # To get servera's IP
+  vars:
+    dest_ports: [22]
+    remote_report_path: "/tmp/portreport_check.csv"
+    local_report_path: "./portreport_check.csv"
+
+  tasks:
+    - name: Get IPs from serverb group
+      set_fact:
+        destination_ips: "{{ groups['serverb'] }}"
+
+    - name: Create report with header on servera
+      copy:
+        dest: "{{ remote_report_path }}"
+        content: "source_ip,destination_ip,port,result\n"
+        force: true
+
+    - name: Run nc checks from servera and append to report
+      shell: >
+        nc -zv {{ item.0 }} {{ item.1 }} &>/dev/null &&
+        echo "{{ ansible_default_ipv4.address }},{{ item.0 }},{{ item.1 }},success" >> {{ remote_report_path }} ||
+        echo "{{ ansible_default_ipv4.address }},{{ item.0 }},{{ item.1 }},failure" >> {{ remote_report_path }}
+      with_nested:
+        - "{{ destination_ips }}"
+        - "{{ dest_ports }}"
+      failed_when: false
+
+    - name: Fetch the audit report back to control node
+      fetch:
+        src: "{{ remote_report_path }}"
+        dest: "{{ local_report_path }}"
+        flat: yes
+
+    - name: Notify where the local report is saved
+      delegate_to: localhost
+      debug:
+        msg: "✅ Port audit report saved to {{ local_report_path }}"
+
